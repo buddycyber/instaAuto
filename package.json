@@ -11,11 +11,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-      "puppeteer": "^21.3.8",
+
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "instagram-private-api": "^1.46.1",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+      "puppeteer": "^21.11.0",
+  "chrome-aws-lambda": "^10.1.0",
   }
 }
