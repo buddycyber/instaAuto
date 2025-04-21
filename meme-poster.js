@@ -15,12 +15,18 @@ const utilities = {
 };
 
 // ======================
-// PINTEREST SCRAPER
+// PINTEREST SCRAPER (OPTIMIZED FOR CLOUD)
 // ======================
 async function getSafeMeme() {
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ['--no-sandbox']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage', // Critical for cloud
+      '--single-process' // Reduces memory usage
+    ],
+    timeout: 120000 // Increased timeout
   });
 
   try {
@@ -28,46 +34,78 @@ async function getSafeMeme() {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    // Search popular memes
-    await page.goto('https://www.pinterest.com/search/pins/?q=funny%20memes&rs=typed', {
-      waitUntil: 'networkidle2',
-      timeout: 60000
+    // Block unnecessary resources
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
     });
 
-    await utilities.randomDelay();
+    // Search with fallback options
+    const searchUrls = [
+      'https://www.pinterest.com/search/pins/?q=funny%20memes&rs=typed',
+      'https://www.pinterest.com/search/pins/?q=dank%20memes',
+      'https://www.pinterest.com/search/pins/?q=trending%20memes'
+    ];
 
-    // Scroll multiple times
-    for (let i = 0; i < 10; i++) {
-      await page.evaluate(() => window.scrollBy(0, 1500));
-      await utilities.delay(1000);
+    let memeUrls = [];
+    for (const url of searchUrls) {
+      try {
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000
+        });
+        
+        await utilities.randomDelay();
+
+        // Scroll with retries
+        for (let i = 0; i < 5; i++) {
+          await page.evaluate(() => window.scrollBy(0, 1500));
+          await utilities.delay(1000);
+        }
+
+        // Get images with multiple selector attempts
+        const selectors = [
+          'img[src*="i.pinimg.com/originals/"]',
+          'img[src*="i.pinimg.com/736x/"]',
+          'img'
+        ];
+
+        for (const selector of selectors) {
+          try {
+            await page.waitForSelector(selector, { timeout: 5000 });
+            const urls = await page.$$eval(selector, imgs => 
+              imgs.map(img => img.src)
+                .filter(src => src && src.match(/\.(jpg|jpeg|png)$/i))
+            );
+            memeUrls = [...memeUrls, ...urls];
+            if (memeUrls.length > 10) break;
+          } catch (e) {}
+        }
+
+        if (memeUrls.length > 0) break;
+      } catch (e) {
+        console.log(`Failed with ${url}, trying next...`);
+      }
     }
-    
 
-    // Get images with safety filters
-    const memeUrls = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('img'))
-        .map(img => {
-          // Get high-res version from common formats
-          let src = img.src;
-          if (src.includes('/236x/')) {
-            src = src.replace('/236x/', '/originals/');
-          } else if (src.includes('/474x/')) {
-            src = src.replace('/474x/', '/originals/');
-          } else if (src.includes('/736x/')) {
-            src = src.replace('/736x/', '/originals/');
-          }
-          return src;
-        })
-        .filter(src =>
-          src.startsWith('https://i.pinimg.com/originals/') &&
-          /\.(jpg|jpeg|png)$/i.test(src)
-        );
-    });
-    
-    
+    if (!memeUrls.length) throw new Error('No memes found after all attempts');
 
-    if (!memeUrls.length) throw new Error('No copyright-safe memes found');
-    return memeUrls[Math.floor(Math.random() * memeUrls.length)];
+    // Filter with safety checks
+    const safeUrls = memeUrls.filter(src => 
+      src && 
+      !src.includes('watermark') &&
+      !src.includes('logo') &&
+      !src.includes('avatar') &&
+      !src.includes('/videos/') &&
+      (src.includes('originals') || src.includes('736x'))
+    );
+
+    if (!safeUrls.length) throw new Error('No copyright-safe memes found');
+    return safeUrls[Math.floor(Math.random() * safeUrls.length)];
 
   } finally {
     await browser.close();
@@ -75,7 +113,7 @@ async function getSafeMeme() {
 }
 
 // ======================
-// INSTAGRAM POSTER
+// INSTAGRAM POSTER (WITH SESSION HANDLING)
 // ======================
 async function safeInstagramPost(imagePath) {
   const ig = new IgApiClient();
@@ -83,41 +121,45 @@ async function safeInstagramPost(imagePath) {
 
   const sessionPath = path.join(__dirname, 'ig-session.json');
 
-  // Load session if it exists
-  if (fs.existsSync(sessionPath)) {
-    const savedSession = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-    await ig.state.deserialize(savedSession);
-    console.log('✅ Restored previous Instagram session');
-  } else {
-    console.log('🔐 Logging in...');
-    await ig.account.login(process.env.INSTA_USERNAME, process.env.INSTA_PASSWORD);
-    const session = await ig.state.serialize();
-    delete session.constants; // recommended to avoid issues
-    fs.writeFileSync(sessionPath, JSON.stringify(session));
-    console.log('✅ Logged in and saved session');
+  try {
+    // Load session if exists
+    if (fs.existsSync(sessionPath)) {
+      await ig.state.deserialize(JSON.parse(fs.readFileSync(sessionPath)));
+      console.log('✅ Restored Instagram session');
+    } else {
+      console.log('🔐 Logging in...');
+      await ig.account.login(process.env.INSTA_USERNAME, process.env.INSTA_PASSWORD);
+      const session = await ig.state.serialize();
+      delete session.constants;
+      fs.writeFileSync(sessionPath, JSON.stringify(session));
+      console.log('✅ Saved new session');
+    }
+
+    const caption = `😂 Funny meme from Pinterest\n\n` +
+                   `Credits to original creator\n` +
+                   `#memes #funny #viral`;
+
+    console.log('📤 Uploading...');
+    await ig.publish.photo({
+      file: await fs.promises.readFile(imagePath),
+      caption: caption,
+    });
+
+    console.log('✅ Post successful!');
+  } catch (err) {
+    // Clear session if error occurs
+    if (fs.existsSync(sessionPath)) fs.unlinkSync(sessionPath);
+    throw err;
   }
-
-  const caption = `😂 Funny meme from Pinterest\n\n` +
-                 `Credits to original creator\n` +
-                 `#memes #funny #viral`;
-
-  console.log('📤 Uploading post...');
-  await ig.publish.photo({
-    file: await fs.promises.readFile(imagePath),
-    caption: caption,
-  });
-
-  console.log('✅ Post successful!');
 }
 
-
 // ======================
-// MAIN FUNCTION
+// MAIN FUNCTION WITH ERROR HANDLING
 // ======================
 async function main() {
   let tempFile;
   try {
-    console.log('🔍 Finding a copyright-safe meme...');
+    console.log('🔍 Finding meme...');
     const memeUrl = await getSafeMeme();
     console.log('📌 Selected:', memeUrl);
 
@@ -125,7 +167,8 @@ async function main() {
     const response = await axios({
       url: memeUrl,
       method: 'GET',
-      responseType: 'stream'
+      responseType: 'stream',
+      timeout: 60000
     });
 
     await new Promise((resolve, reject) => {
@@ -137,36 +180,40 @@ async function main() {
     console.log('📤 Posting to Instagram...');
     await safeInstagramPost(tempFile);
   } catch (error) {
-    console.error('❌ Failed:', error.message);
+    console.error('❌ Error:', error.message);
+    throw error;
   } finally {
     if (tempFile && fs.existsSync(tempFile)) {
-      fs.unlink(tempFile, () => { });
+      fs.unlink(tempFile, () => {});
     }
   }
 }
 
 // ======================
-// START THE BOT
+// SCHEDULER WITH RANDOM INTERVALS
 // ======================
 (async () => {
-  try {
-    await main();
-  } catch (error) {
-    console.error('Fatal error:', error);
-  }
-})();
-
-(async () => {
   while (true) {
+    const startTime = Date.now();
+    
     try {
       await main();
     } catch (error) {
-      console.error('Fatal error:', error);
+      console.error('⚠️ Critical error:', error);
+      
+      // Wait longer if error occurs
+      const errorDelay = Math.floor(Math.random() * 30) + 30; // 30-60 minutes
+      console.log(`⏳ Waiting ${errorDelay} minutes after error...`);
+      await utilities.delay(errorDelay * 60 * 1000);
+      continue;
     }
 
-    // ⏱️ Wait before posting the next meme (e.g., 1 hour)
-    const delayInMinutes = Math.floor(Math.random() * 11) + 40;
-    console.log(`🕒 Waiting ${delayInMinutes} minutes before next post...`);
-    await utilities.delay(delayInMinutes * 60 * 1000);
+    // Random delay between 40-70 minutes
+    const delayMinutes = Math.floor(Math.random() * 31) + 40;
+    const elapsed = (Date.now() - startTime) / 1000 / 60;
+    const remainingDelay = Math.max(1, delayMinutes - elapsed);
+    
+    console.log(`⏳ Next post in ${Math.round(remainingDelay)} minutes...`);
+    await utilities.delay(remainingDelay * 60 * 1000);
   }
 })();
