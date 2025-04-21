@@ -5,12 +5,10 @@ module.exports = async (req, res) => {
   let browser = null;
 
   try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
+await puppeteer.launch({
+  headless: "new",
+  args: ["--no-sandbox", "--disable-setuid-sandbox"]
+});
 
     const page = await browser.newPage();
     await page.goto('https://www.pinterest.com/search/pins/?q=funny%20memes&rs=typed', {
