@@ -4,20 +4,19 @@
   "description": "",
   "main": "meme-poster.js",
   "scripts": {
-     "start": "node --max-old-space-size=512 meme-poster.js",
+    "start": "node --max-old-space-size=512 meme-poster.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "instagram-private-api": "^1.46.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-      "puppeteer": "^21.11.0",
-  "chrome-aws-lambda": "^10.1.0"
+    "puppeteer": "^21.11.0",
+    "chrome-aws-lambda": "^10.1.0"
   }
 }
